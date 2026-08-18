@@ -95,14 +95,38 @@ def _microreticulum_src(env, filename):
 #  Job 2 — DATA / PROOF packet forwarding for transport nodes
 #
 #  microReticulum's Transport::inbound() handles ANNOUNCE rebroadcast
-#  correctly but drops DATA packets that aren't for a local destination.
-#  Upstream Python Reticulum forwards these packets when transport is
-#  enabled. For a single-interface repeater, we just rebroadcast the
-#  raw packet with an incremented hop count.
+#  correctly (via the announce table + jobs() retransmit path) but
+#  drops DATA / PROOF packets whose destination is not local and not
+#  in the reverse table. Upstream Python Reticulum forwards these
+#  when transport is enabled. For a single-interface LoRa repeater
+#  the correct behaviour is to rebroadcast the raw packet on every
+#  *other* interface with the hop count that Transport::inbound()
+#  already incremented (packet.hops() is bumped at the top of
+#  inbound(), so by the time we reach this branch it already
+#  reflects "one more hop through us").
 #
-#  This patch adds forwarding logic to the "Local destination not found"
+#  This patch adds forwarding to the "Local destination not found"
 #  branch (DATA) and the "Proof is not candidate for transporting"
 #  branch (PROOF) in Transport.cpp.
+#
+#  Wire-format notes (Reticulum spec / Packet.cpp):
+#    byte 0 : flags (header_type << 6 | context_flag << 5 |
+#                     transport_type << 4 | dest_type << 2 | packet_type)
+#    byte 1 : hop count
+#    bytes 2..17 : destination hash (HEADER_1)
+#    bytes 2..17 : transport id, bytes 18..33 : destination hash (HEADER_2)
+#    then context byte + data
+#
+#  Only byte 1 changes on retransmit; everything from byte 2 onward
+#  is copied verbatim. We rebuild new_raw as flag || hops || rest,
+#  using assign()+overwrite rather than Bytes::operator<< (which
+#  appends and would grow the buffer past its pre-sized length,
+#  emitting a malformed frame). We also skip the receiving
+#  interface so a single-interface repeater does not re-key its
+#  own radio onto a packet it just heard (the airtime is wasted
+#  and the rebroadcast would be filtered by our own packet
+#  hashlist anyway, but it also confuses adjacent nodes that
+#  see the same hop count from the same interface twice).
 # ---------------------------------------------------------------
 
 DATA_FWD_MARKER = "// RLR_DATA_FORWARD_PATCH"
@@ -113,22 +137,36 @@ DATA_FWD_PATCHED = """\t\t\t\telse {
 \t\t\t\t\t""" + DATA_FWD_MARKER + """
 \t\t\t\t\tDEBUGF("Transport::inbound: Local destination %s not found, not handling packet locally", packet.destination_hash().toHex().c_str());
 \t\t\t\t\t// Forward DATA packets when transport is enabled (repeater mode).
-\t\t\t\t\t// Rebroadcast with updated hop count on all interfaces.
+\t\t\t\t\t// Rebuild the wire bytes with the hop count that inbound()
+\t\t\t\t\t// already incremented; copy everything else verbatim.
 \t\t\t\t\tif (Reticulum::transport_enabled() && packet.hops() < Type::Transport::PATHFINDER_M) {
-\t\t\t\t\t\tBytes new_raw(packet.raw().size());
-\t\t\t\t\t\tnew_raw << packet.raw().left(1);      // flags byte
-\t\t\t\t\t\tnew_raw << packet.hops();              // updated hop count
-\t\t\t\t\t\tnew_raw << packet.raw().mid(2);         // rest of packet unchanged
+\t\t\t\t\t\tconst Bytes& orig = packet.raw();
+\t\t\t\t\t\tBytes new_raw;
+\t\t\t\t\t\tnew_raw.reserve(orig.size());
+\t\t\t\t\t\tnew_raw << (uint8_t)orig[0];   // flags byte
+\t\t\t\t\t\tnew_raw << (uint8_t)packet.hops();  // updated hop count
+\t\t\t\t\t\tnew_raw << orig.mid(2);         // rest of packet unchanged
+\t\t\t\t\t\t// Rebroadcast on every interface except the one we heard it
+\t\t\t\t\t\t// on. On a single-interface LoRa repeater that set is empty,
+\t\t\t\t\t\t// so fall back to retransmitting on the same interface -
+\t\t\t\t\t\t// that is exactly what a one-radio repeater must do.
+\t\t\t\t\t\tbool forwarded = false;
 \t\t\t\t\t\tfor (auto& [hash, iface] : _interfaces) {
+\t\t\t\t\t\t\tif (iface == packet.receiving_interface()) continue;
 \t\t\t\t\t\t\tDEBUGF("Transport::inbound: Forwarding DATA packet for %s on %s (hops=%d)", packet.destination_hash().toHex().c_str(), iface.toString().c_str(), packet.hops());
 \t\t\t\t\t\t\ttransmit(iface, new_raw);
+\t\t\t\t\t\t\tforwarded = true;
+\t\t\t\t\t\t}
+\t\t\t\t\t\tif (!forwarded) {
+\t\t\t\t\t\t\tDEBUGF("Transport::inbound: Re-transmitting DATA packet for %s on sole interface %s (hops=%d)", packet.destination_hash().toHex().c_str(), packet.receiving_interface().toString().c_str(), packet.hops());
+\t\t\t\t\t\t\ttransmit(const_cast<Interface&>(packet.receiving_interface()), new_raw);
 \t\t\t\t\t\t}
 \t\t\t\t\t}
 \t\t\t\t}"""
 
 # Also patch PROOF forwarding — when transport is enabled and proof
 # is not in reverse_table, rebroadcast it so proofs can traverse
-# the repeater back to the sender.
+# the repeater back to the sender. Same wire-rebuild as DATA.
 PROOF_FWD_MARKER = "// RLR_PROOF_FORWARD_PATCH"
 
 PROOF_FWD_ORIGINAL = '\t\t\t\t\tTRACE("Proof is not candidate for transporting");'
@@ -136,13 +174,22 @@ PROOF_FWD_ORIGINAL = '\t\t\t\t\tTRACE("Proof is not candidate for transporting")
 PROOF_FWD_PATCHED = """\t\t\t\t\t""" + PROOF_FWD_MARKER + """
 \t\t\t\t\t// Forward PROOFs when transport is enabled (repeater mode).
 \t\t\t\t\tif (Reticulum::transport_enabled() && packet.hops() < Type::Transport::PATHFINDER_M) {
-\t\t\t\t\t\tBytes new_raw(packet.raw().size());
-\t\t\t\t\t\tnew_raw << packet.raw().left(1);
-\t\t\t\t\t\tnew_raw << packet.hops();
-\t\t\t\t\t\tnew_raw << packet.raw().mid(2);
+\t\t\t\t\t\tconst Bytes& orig = packet.raw();
+\t\t\t\t\t\tBytes new_raw;
+\t\t\t\t\t\tnew_raw.reserve(orig.size());
+\t\t\t\t\t\tnew_raw << (uint8_t)orig[0];
+\t\t\t\t\t\tnew_raw << (uint8_t)packet.hops();
+\t\t\t\t\t\tnew_raw << orig.mid(2);
+\t\t\t\t\t\tbool forwarded = false;
 \t\t\t\t\t\tfor (auto& [hash, iface] : _interfaces) {
+\t\t\t\t\t\t\tif (iface == packet.receiving_interface()) continue;
 \t\t\t\t\t\t\tDEBUGF("Transport::inbound: Forwarding PROOF on %s (hops=%d)", iface.toString().c_str(), packet.hops());
 \t\t\t\t\t\t\ttransmit(iface, new_raw);
+\t\t\t\t\t\t\tforwarded = true;
+\t\t\t\t\t\t}
+\t\t\t\t\t\tif (!forwarded) {
+\t\t\t\t\t\t\tDEBUGF("Transport::inbound: Re-transmitting PROOF on sole interface %s (hops=%d)", packet.receiving_interface().toString().c_str(), packet.hops());
+\t\t\t\t\t\t\ttransmit(const_cast<Interface&>(packet.receiving_interface()), new_raw);
 \t\t\t\t\t\t}
 \t\t\t\t\t}
 \t\t\t\t\telse {
