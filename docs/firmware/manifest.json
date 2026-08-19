@@ -1,6 +1,23 @@
 {
-  "generated_at": "2026-06-24T17:34:16+00:00",
+  "generated_at": "2026-08-19T15:46:36+00:00",
   "releases": [
+    {
+      "tag": "v0.6.4-f0139db",
+      "prerelease": true,
+      "boards": [
+        {
+          "name": "RAK4631",
+          "dfu_json_path": "firmware/v0.6.4-f0139db/reticulum-lora-repeater-RAK4631-v0.6.4-f0139db.dfu.json",
+          "dfu_json_size": 886875,
+          "hex_path": "firmware/v0.6.4-f0139db/reticulum-lora-repeater-RAK4631-v0.6.4-f0139db.hex",
+          "hex_size": 1870778,
+          "uf2_path": "firmware/v0.6.4-f0139db/reticulum-lora-repeater-RAK4631-v0.6.4-f0139db.uf2",
+          "uf2_size": 1330176,
+          "zip_path": "firmware/v0.6.4-f0139db/reticulum-lora-repeater-RAK4631-v0.6.4-f0139db.zip",
+          "zip_size": 665883
+        }
+      ]
+    },
     {
       "tag": "v0.6.3",
       "prerelease": false,
