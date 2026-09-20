@@ -196,7 +196,14 @@ bool send_now(const Config& cfg) {
 
 void tick(const Config& cfg) {
     if (!s_ready) return;
-    if ((cfg.flags & CONFIG_FLAG_TELEMETRY) == 0) return;
+    if ((cfg.flags & CONFIG_FLAG_TELEMETRY) == 0) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            Serial.println("Telemetry: telemetry is disabled in config — telemetry pushes are OFF");
+        }
+        return;
+    }
     if (!rlr::radio::online()) return;
     if (collector_unset(cfg)) return;
 
@@ -205,7 +212,17 @@ void tick(const Config& cfg) {
     // iteration and flood the mesh. Existing configs saved before the
     // input floor existed can still carry a 0 here, so the guard lives
     // at the point of use rather than only in set_field().
-    if (cfg.tele_interval_ms == 0) return;
+    if (cfg.tele_interval_ms == 0) {
+        // Say it once. Returning in silence here looks identical to a
+        // node that is announcing fine, which is the whole problem the
+        // old always-fire behaviour hid.
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            Serial.println("Telemetry: tele_interval_ms is 0 — telemetry pushes are OFF");
+        }
+        return;
+    }
 
     uint32_t now = millis();
     bool due;

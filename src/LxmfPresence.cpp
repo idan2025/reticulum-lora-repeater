@@ -88,7 +88,14 @@ void announce_now(const Config& cfg) {
 
 void tick(const Config& cfg) {
     if (!s_ready) return;
-    if ((cfg.flags & CONFIG_FLAG_LXMF) == 0) return;
+    if ((cfg.flags & CONFIG_FLAG_LXMF) == 0) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            Serial.println("LxmfPresence: lxmf is disabled in config — presence announces are OFF");
+        }
+        return;
+    }
     if (!rlr::radio::online()) return;
 
     // An interval of 0 means "off". Without this the subtraction below
@@ -96,7 +103,17 @@ void tick(const Config& cfg) {
     // iteration and flood the mesh. Existing configs saved before the
     // input floor existed can still carry a 0 here, so the guard lives
     // at the point of use rather than only in set_field().
-    if (cfg.lxmf_interval_ms == 0) return;
+    if (cfg.lxmf_interval_ms == 0) {
+        // Say it once. Returning in silence here looks identical to a
+        // node that is announcing fine, which is the whole problem the
+        // old always-fire behaviour hid.
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            Serial.println("LxmfPresence: lxmf_interval_ms is 0 — presence announces are OFF");
+        }
+        return;
+    }
 
     uint32_t now = millis();
     bool due;

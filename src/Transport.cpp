@@ -83,10 +83,29 @@ protected:
                 return true;
             }
             // RX-only gate (issue #4): when TX is disabled the device
-            // silently drops outgoing frames. We report success to the
-            // stack so it treats the packet as handled (no retry churn)
-            // and we don't bump s_packets_out, keeping STATUS honest.
+            // drops outgoing frames. We report success to the stack so
+            // it treats the packet as handled (no retry churn) and we
+            // don't bump s_packets_out, keeping STATUS honest.
+            //
+            // Say so on the way past. Dropping in silence here is what
+            // makes an RX-only node look broken rather than merely
+            // unconfigured: LxmfPresence logs "announcing as ..." and
+            // Telemetry logs "sent", both at their own layer, and then
+            // nothing reaches the air with no line anywhere connecting
+            // the two. Rate-limited to once a minute because every
+            // frame the stack offers lands here.
             if (!rlr::radio::tx_enabled()) {
+                static uint32_t dropped     = 0;
+                static uint32_t last_log_ms = 0;
+                dropped++;
+                uint32_t now = millis();
+                if (last_log_ms == 0 || (now - last_log_ms) >= 60000) {
+                    last_log_ms = now;
+                    Serial.print("LoRaInterface: TX is disabled (RX-only) — dropped ");
+                    Serial.print(dropped);
+                    Serial.println(" outgoing frame(s) so far. Enable TX in the configurator,");
+                    Serial.println("  or over serial: CONFIG SET tx_enabled 1 then CONFIG COMMIT");
+                }
                 RNS::InterfaceImpl::handle_outgoing(data);
                 return true;
             }
