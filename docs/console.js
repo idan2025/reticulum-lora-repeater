@@ -643,13 +643,20 @@ class RLRConsole {
     // that the periodic tick keys the transmitter faster than a LoRa
     // duty cycle tolerates and starves the repeater's own forwarding.
     const MIN_INTERVAL_MIN = 10000 / 60000;
+    // Upper bound mirrors MAX_PERIODIC_INTERVAL_MS in src/Config.cpp.
+    // These boxes are in MINUTES, and entering a value meant as seconds
+    // is an easy mistake that produces a node which announces once and
+    // then goes quiet for days — indistinguishable from a broken one.
+    const MAX_INTERVAL_MIN = 604800000 / 60000;   // 7 days
     const tele = parseFloat($('cfg-tele_interval_min').value);
     if (isNaN(tele) || tele < 0) errs.push('Telemetry interval must be >= 0 minutes');
     else if (tele > 0 && tele < MIN_INTERVAL_MIN) errs.push('Telemetry interval must be 0 (off) or at least 10 seconds');
+    else if (tele > MAX_INTERVAL_MIN) errs.push('Telemetry interval must be at most ' + MAX_INTERVAL_MIN + ' minutes (7 days) — this field is in MINUTES');
 
     const lxmf = parseFloat($('cfg-lxmf_interval_min').value);
     if (isNaN(lxmf) || lxmf < 0) errs.push('LXMF interval must be >= 0 minutes');
     else if (lxmf > 0 && lxmf < MIN_INTERVAL_MIN) errs.push('LXMF interval must be 0 (off) or at least 10 seconds');
+    else if (lxmf > MAX_INTERVAL_MIN) errs.push('LXMF interval must be at most ' + MAX_INTERVAL_MIN + ' minutes (7 days) — this field is in MINUTES');
 
     const pin = parseInt($('cfg-bt_pin').value);
     if (isNaN(pin) || pin < 0 || pin > 999999) errs.push('BT PIN must be 0..999999');
@@ -802,7 +809,9 @@ class RLRConsole {
       } else {
         const r = await con.send('STATUS');
         if (r.ok) {
-          for (const line of r.payload) log('info', line);
+          // send() already logs every payload line as it arrives, so
+          // re-logging them here printed the whole STATUS block twice,
+          // interleaved with the live stream and impossible to read.
           log('ok', 'status retrieved');
         } else {
           log('err', 'status failed: ' + r.error);

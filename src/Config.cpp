@@ -45,6 +45,14 @@ static constexpr const char* CONFIG_TMP_PATH = "/config.new";
 // values get the floor; configs already in the field keep working.
 static constexpr unsigned long MIN_PERIODIC_INTERVAL_MS = 10000UL;
 
+// Ceiling for the same fields. strtoul saturates at ULONG_MAX rather
+// than reporting overflow, and on this 32-bit target that lands
+// silently in the field as 4294967295 ms — 49.7 days — so a fat-
+// fingered value was accepted and looked like the task had simply
+// stopped. Seven days is far beyond any sane announce cadence while
+// still leaving the saturated value out of range.
+static constexpr unsigned long MAX_PERIODIC_INTERVAL_MS = 604800000UL;   // 7 days
+
 // Size of the v1 Config struct on disk (before bt_pin/lat/lon/alt fields).
 // v1 layout: version(2) + _reserved(2) + freq_hz(4) + bw_hz(4) + sf(1) +
 //   cr(1) + txp_dbm(1) + flags(1) + batt_mult(4) + tele_interval_ms(4) +
@@ -538,6 +546,7 @@ const char* set_field(Config& cfg, const char* key, const char* value) {
         if (end == value || *end != '\0')    return "tele_interval_ms must be an integer";
         if (v != 0 && v < MIN_PERIODIC_INTERVAL_MS)
                                              return "tele_interval_ms must be 0 (off) or >= 10000";
+        if (v > MAX_PERIODIC_INTERVAL_MS)    return "tele_interval_ms must be <= 604800000 (7 days)";
         cfg.tele_interval_ms = (uint32_t)v;
         return nullptr;
     }
@@ -547,6 +556,7 @@ const char* set_field(Config& cfg, const char* key, const char* value) {
         if (end == value || *end != '\0')    return "lxmf_interval_ms must be an integer";
         if (v != 0 && v < MIN_PERIODIC_INTERVAL_MS)
                                              return "lxmf_interval_ms must be 0 (off) or >= 10000";
+        if (v > MAX_PERIODIC_INTERVAL_MS)    return "lxmf_interval_ms must be <= 604800000 (7 days)";
         cfg.lxmf_interval_ms = (uint32_t)v;
         return nullptr;
     }

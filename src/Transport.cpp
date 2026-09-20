@@ -238,8 +238,26 @@ void tick() {
     }
 }
 
-uint32_t path_count()        { return 0; } // TODO Phase 4
-uint32_t destination_count() { return 0; } // TODO Phase 4
+// Both of these were hardcoded to 0 with a "TODO Phase 4" note, which
+// made STATUS actively misleading: a node happily receiving announces
+// and forwarding traffic still reported "paths=0 destinations=0",
+// which reads exactly like a node that has not joined the mesh.
+//
+// Learned paths live in the microStore-backed table, not the legacy
+// _path_table map (which the cull job still walks but nothing
+// populates — see the note in init() about path_table_maxsize).
+// TypedStore exposes size(); DestinationTable is a std::map.
+uint32_t path_count() {
+    if (!s_initialized) return 0;
+    try { return (uint32_t)RNS::Transport::new_path_table().size(); }
+    catch (const std::exception&) { return 0; }
+}
+
+uint32_t destination_count() {
+    if (!s_initialized) return 0;
+    try { return (uint32_t)RNS::Transport::destinations().size(); }
+    catch (const std::exception&) { return 0; }
+}
 uint32_t packets_in()        { return s_packets_in; }
 uint32_t packets_out()       { return s_packets_out; }
 
