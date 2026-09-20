@@ -26,6 +26,11 @@ namespace rlr { namespace config {
 // transport_identity files that microReticulum manages on its own.
 static constexpr const char* CONFIG_PATH = "/config.bin";
 
+// Scratch path for the write-then-rename save (see save() below).
+// Lives in the same littlefs partition so the rename is a metadata-only
+// operation and therefore atomic.
+static constexpr const char* CONFIG_TMP_PATH = "/config.new";
+
 // Size of the v1 Config struct on disk (before bt_pin/lat/lon/alt fields).
 // v1 layout: version(2) + _reserved(2) + freq_hz(4) + bw_hz(4) + sf(1) +
 //   cr(1) + txp_dbm(1) + flags(1) + batt_mult(4) + tele_interval_ms(4) +
@@ -131,6 +136,22 @@ bool validate(const Config& cfg) {
 // expected to call defaults() or treat as first boot).
 bool load(Config& out) {
     try {
+        // Reconcile a scratch file left behind by an interrupted save().
+        // If the live record is gone but the scratch one survived, the
+        // reset landed between the two and the scratch file is the only
+        // copy we have — adopt it. If both exist, the save never got as
+        // far as reporting success, so the live record is still the
+        // authoritative one and the scratch file is stale.
+        if (RNS::Utilities::OS::file_exists(CONFIG_TMP_PATH)) {
+            if (!RNS::Utilities::OS::file_exists(CONFIG_PATH)) {
+                Serial.println("Config: recovering /config.new from interrupted save");
+                RNS::Utilities::OS::rename_file(CONFIG_TMP_PATH, CONFIG_PATH);
+            } else {
+                Serial.println("Config: discarding stale /config.new");
+                RNS::Utilities::OS::remove_file(CONFIG_TMP_PATH);
+            }
+        }
+
         if (!RNS::Utilities::OS::file_exists(CONFIG_PATH)) {
             Serial.println("Config: /config.bin not present — first boot");
             return false;
@@ -180,7 +201,14 @@ bool load(Config& out) {
             // Manually unpack v1 fields (all packed, no padding).
             size_t off = 0;
             memcpy(&tmp.version,          p + off, 2); off += 2;
-            memcpy(&tmp._reserved,        p + off, 2); off += 2;
+            // v1 had a 2-byte `_reserved` here; v3 splits that into
+            // log_level + _reserved. Those bytes are always zero in a v1
+            // record, so copying them across would land log_level=0
+            // (quiet) on every migrated node and silence its logging.
+            // Skip them and seed the normal default instead.
+            off += 2;
+            tmp.log_level  = 1;   // normal — v1 had no log_level concept
+            tmp._reserved  = 0;
             memcpy(&tmp.freq_hz,          p + off, 4); off += 4;
             memcpy(&tmp.bw_hz,            p + off, 4); off += 4;
             memcpy(&tmp.sf,               p + off, 1); off += 1;
@@ -319,15 +347,54 @@ bool save(const Config& in) {
         tmp.crc32 = crc32_of(reinterpret_cast<const uint8_t*>(&tmp), crc_covered);
 
         RNS::Bytes data(reinterpret_cast<const uint8_t*>(&tmp), sizeof(Config));
-        size_t written = RNS::Utilities::OS::write_file(CONFIG_PATH, data);
+
+        // Write to a scratch file first, then rename over the live one.
+        //
+        // Writing straight to CONFIG_PATH loses the config outright on
+        // any failure: microStore's FileSystem::writeFile() unlinks the
+        // destination before it opens it for writing (and the nRF52
+        // InternalFS adapter removes it a second time inside open(),
+        // because littlefs truncation is broken there). So the old
+        // record is already gone by the time the first new byte is
+        // written. A brownout, a watchdog reset, or an open() that
+        // fails because the partition is full all leave NO config on
+        // flash at all — the node keeps running on its in-RAM copy and
+        // looks fine, then comes up on board defaults at the next power
+        // cycle. The failure is invisible until that reboot.
+        //
+        // Rename is metadata-only in littlefs and atomically replaces an
+        // existing destination, so CONFIG_PATH only ever holds a
+        // complete record: the old one or the new one, never neither.
+        size_t written = RNS::Utilities::OS::write_file(CONFIG_TMP_PATH, data);
         if (written != sizeof(Config)) {
             Serial.print("Config::save: short write (");
             Serial.print(written);
             Serial.print("/");
             Serial.print(sizeof(Config));
-            Serial.println(" bytes)");
+            Serial.println(" bytes) — live config left untouched");
+            RNS::Utilities::OS::remove_file(CONFIG_TMP_PATH);
             return false;
         }
+
+        // Read the scratch file back before committing to it. A write
+        // that reports the right byte count can still have landed
+        // badly on a worn or full partition, and we would rather fail
+        // the COMMIT than rename a corrupt record over a good one.
+        RNS::Bytes verify;
+        size_t read_back = RNS::Utilities::OS::read_file(CONFIG_TMP_PATH, verify);
+        if (read_back != sizeof(Config) ||
+            memcmp(verify.data(), &tmp, sizeof(Config)) != 0) {
+            Serial.println("Config::save: readback mismatch — live config left untouched");
+            RNS::Utilities::OS::remove_file(CONFIG_TMP_PATH);
+            return false;
+        }
+
+        if (!RNS::Utilities::OS::rename_file(CONFIG_TMP_PATH, CONFIG_PATH)) {
+            Serial.println("Config::save: rename failed — live config left untouched");
+            RNS::Utilities::OS::remove_file(CONFIG_TMP_PATH);
+            return false;
+        }
+
         Serial.print("Config: saved to /config.bin (");
         Serial.print(written);
         Serial.println(" bytes)");
