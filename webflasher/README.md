@@ -83,7 +83,8 @@ docs/SERIAL_PROTOCOL.md command set.
 
 ## Deployment
 
-GitHub Pages from the `gh-pages` branch or a `/docs` folder. CI
-updates `webflasher/firmware/*.zip` on every release tag. A single
-URL — `thatSFguy.github.io/reticulum-lora-repeater/` — is the only
-entry point an end user ever needs to know about.
+GitHub Pages serves the `/docs` folder of `master`. CI commits each
+release's per-board assets into `docs/firmware/<tag>/` and regenerates
+`docs/firmware/manifest.json` on every release tag. A single URL —
+`idan2025.github.io/reticulum-lora-repeater/` — is the only entry
+point an end user ever needs to know about.

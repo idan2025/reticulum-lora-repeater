@@ -1,6 +1,6 @@
 # Reticulum LoRa Repeater — Web Flasher & Configurator
 
-Live: **https://thatSFguy.github.io/reticulum-lora-repeater/**
+Live: **https://idan2025.github.io/reticulum-lora-repeater/**
 
 Flash firmware and configure your Reticulum LoRa Repeater node
 directly from the browser. No PlatformIO, no toolchain, no

@@ -4,7 +4,12 @@ A tiny, purpose-built [Reticulum](https://reticulum.network/) LoRa
 transport repeater firmware for low-power nRF52 boards. Flash it from
 your browser, configure over USB or Bluetooth, and your node is on the air.
 
-**Web flasher:** https://thatSFguy.github.io/reticulum-lora-repeater/
+**Web flasher:** https://idan2025.github.io/reticulum-lora-repeater/
+
+> **About this fork.** The original upstream repo (`thatSFguy/reticulum-lora-repeater`)
+> and its hosted flasher are gone. This fork keeps the web flasher online at the URL
+> above, serving every published firmware version from `docs/firmware/` on the same
+> origin — no GitHub Releases or external CDN needed for the firmware itself.
 
 **Target user:** already running [Meshtastic](https://meshtastic.org/)
 or [MeshCore](https://github.com/ripplebiz/MeshCore) on an
@@ -13,7 +18,7 @@ running a dedicated repeater without a toolchain install.
 
 ## Quick start
 
-1. Visit **https://thatSFguy.github.io/reticulum-lora-repeater/**
+1. Visit **https://idan2025.github.io/reticulum-lora-repeater/**
 2. On the **Flash** tab, pick your **board** and **version**, click **Connect & flash**
 3. Pick the board's USB port — it reboots itself into the bootloader
    automatically (double-tap reset only if it doesn't), then click
@@ -156,7 +161,7 @@ boot (missing fields, including `collector`, are zero-filled).
 
 ### Web flasher / configurator
 
-The hosted web app at https://thatSFguy.github.io/reticulum-lora-repeater/ provides:
+The hosted web app at https://idan2025.github.io/reticulum-lora-repeater/ provides:
 
 - **Flash firmware** directly from the browser via Web Serial DFU
 - **Connect USB** or **Connect BLE** to configure the node
@@ -192,7 +197,7 @@ CALIBRATE BATTERY <mv>     - derive batt_mult from measured voltage
 ## From source (developer workflow)
 
 ```bash
-git clone https://github.com/thatSFguy/reticulum-lora-repeater
+git clone https://github.com/idan2025/reticulum-lora-repeater
 cd reticulum-lora-repeater
 pio run -e Faketec -t upload --upload-port COMxx
 pio device monitor -e Faketec --port COMxx

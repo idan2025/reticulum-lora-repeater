@@ -203,7 +203,7 @@ jobs:
           ## Flashing
 
           The easiest way to flash is the **web flasher** — visit
-          https://thatSFguy.github.io/reticulum-lora-repeater/
+          https://idan2025.github.io/reticulum-lora-repeater/
           and pick this version from the dropdown. No toolchain
           install required, works in any Chromium-based browser.
 
