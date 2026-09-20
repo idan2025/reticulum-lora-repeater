@@ -638,11 +638,18 @@ class RLRConsole {
     const txp = parseInt($('cfg-txp_dbm').value);
     if (isNaN(txp) || txp < -9 || txp > 22) errs.push('TX power must be -9..22 dBm');
 
+    // Firmware floor: 0 disables the task, anything else must be at
+    // least 10 s (MIN_PERIODIC_INTERVAL_MS in src/Config.cpp). Below
+    // that the periodic tick keys the transmitter faster than a LoRa
+    // duty cycle tolerates and starves the repeater's own forwarding.
+    const MIN_INTERVAL_MIN = 10000 / 60000;
     const tele = parseFloat($('cfg-tele_interval_min').value);
     if (isNaN(tele) || tele < 0) errs.push('Telemetry interval must be >= 0 minutes');
+    else if (tele > 0 && tele < MIN_INTERVAL_MIN) errs.push('Telemetry interval must be 0 (off) or at least 10 seconds');
 
     const lxmf = parseFloat($('cfg-lxmf_interval_min').value);
     if (isNaN(lxmf) || lxmf < 0) errs.push('LXMF interval must be >= 0 minutes');
+    else if (lxmf > 0 && lxmf < MIN_INTERVAL_MIN) errs.push('LXMF interval must be 0 (off) or at least 10 seconds');
 
     const pin = parseInt($('cfg-bt_pin').value);
     if (isNaN(pin) || pin < 0 || pin > 999999) errs.push('BT PIN must be 0..999999');

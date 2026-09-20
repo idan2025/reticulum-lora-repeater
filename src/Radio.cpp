@@ -11,6 +11,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <RadioLib.h>
+#include <math.h>
 
 namespace rlr { namespace radio {
 
@@ -50,6 +51,37 @@ static uint8_t  s_split_buf[512];    // buffered first-half payload (no header)
 static size_t   s_split_len = 0;     // bytes in split_buf
 static uint8_t  s_split_seq = 0xFF;  // sequence nibble of first half (0xFF = none)
 static uint32_t s_split_ms  = 0;     // millis() when first half arrived
+
+// How long a buffered first half is held while waiting for its second
+// half. Recomputed in begin() from the configured SF/BW/CR.
+//
+// The two halves go out back to back, so the gap between them is one
+// whole frame's time on air. That is ~0.4 s at SF7/BW125 but ~2.4 s at
+// the SF10/BW125 default and ~9 s at SF12/BW125. The deadline here used
+// to be a flat 500 ms, which expires before the second half can
+// physically arrive at anything above SF7 — so on a default-configured
+// node every packet larger than 254 bytes had its first half discarded
+// and never reassembled.
+static uint32_t s_split_timeout_ms = 2000;
+
+// Time on air in milliseconds for a LoRa frame carrying payload_bytes,
+// per Semtech AN1200.13. Assumes explicit header and CRC on, matching
+// begin(). cfg.cr is the 4/x denominator (5..8), which is already the
+// (CR + 4) multiplier the formula calls for.
+static uint32_t frame_toa_ms(uint8_t sf, uint32_t bw_hz, uint8_t cr,
+                             size_t payload_bytes, uint16_t preamble) {
+    if (sf < 7 || sf > 12 || bw_hz == 0 || cr < 5 || cr > 8) return 0;
+    const double ts_ms = ((double)(1UL << sf) / (double)bw_hz) * 1000.0;
+    // Low-data-rate optimisation is mandatory once a symbol reaches
+    // 16 ms; it takes two bits out of every symbol group.
+    const int    de  = (ts_ms >= 16.0) ? 1 : 0;
+    const double num = 8.0 * (double)payload_bytes - 4.0 * (double)sf + 28.0 + 16.0;
+    const double den = 4.0 * (double)(sf - 2 * de);
+    double n_payload = ceil(num / den) * (double)cr;
+    if (n_payload < 0.0) n_payload = 0.0;
+    const double symbols = (double)preamble + 4.25 + 8.0 + n_payload;
+    return (uint32_t)(symbols * ts_ms + 0.5);
+}
 
 // ISR flag set by RadioLib's packet-received callback. Volatile
 // because it's written from interrupt context and read from loop().
@@ -147,6 +179,22 @@ bool begin(const Config& cfg) {
 
     s_radio.setRxBoostedGainMode(true);
 
+    // Size the split-reassembly deadline to the airtime these settings
+    // imply: two full frames plus a second of slack for the sender's
+    // TX->RX->TX turnaround between the halves.
+    {
+        uint32_t toa = frame_toa_ms(cfg.sf, cfg.bw_hz, cfg.cr, SINGLE_MTU, preamble_len);
+        uint32_t t   = 2u * toa + 1000u;
+        if (t < 1000u)  t = 1000u;
+        if (t > 30000u) t = 30000u;
+        s_split_timeout_ms = t;
+        Serial.print("Radio: frame airtime ");
+        Serial.print(toa);
+        Serial.print(" ms, split reassembly timeout ");
+        Serial.print(s_split_timeout_ms);
+        Serial.println(" ms");
+    }
+
     s_online = true;
     Serial.print("Radio: configured @ ");
     Serial.print(cfg.freq_hz);
@@ -196,8 +244,9 @@ void stop() {
 }
 
 int read_pending(uint8_t* buf, size_t bufsize) {
-    // Expire stale split-packet first half (500ms timeout)
-    if (s_split_seq != 0xFF && (millis() - s_split_ms) > 500) {
+    // Expire a stale split-packet first half (deadline scales with the
+    // configured airtime — see s_split_timeout_ms).
+    if (s_split_seq != 0xFF && (millis() - s_split_ms) > s_split_timeout_ms) {
         Serial.println("Radio: split timeout, discarding first half");
         s_split_seq = 0xFF;
         s_split_len = 0;

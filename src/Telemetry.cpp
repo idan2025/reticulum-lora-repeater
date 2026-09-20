@@ -200,6 +200,13 @@ void tick(const Config& cfg) {
     if (!rlr::radio::online()) return;
     if (collector_unset(cfg)) return;
 
+    // An interval of 0 means "off". Without this the subtraction below
+    // is always >= 0, so the task would fire on every single loop
+    // iteration and flood the mesh. Existing configs saved before the
+    // input floor existed can still carry a 0 here, so the guard lives
+    // at the point of use rather than only in set_field().
+    if (cfg.tele_interval_ms == 0) return;
+
     uint32_t now = millis();
     bool due;
     if (s_last_ms == 0) {
