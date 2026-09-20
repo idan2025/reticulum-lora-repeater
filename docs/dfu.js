@@ -193,6 +193,10 @@ const DFU_PACKET_MAX_SIZE    = 512;
 // some boards (RAK4631) a flash-page write during the DATA phase delays
 // the transport ack past 1 s, surfacing as "no ack for opcode 4".
 const ACK_TIMEOUT_MS         = 2500;
+// Consecutive unacknowledged DATA packets that mean the link is dead
+// rather than merely slow. At ACK_TIMEOUT_MS each this is ~20s of total
+// silence, which no healthy bootloader produces mid-stream.
+const MAX_CONSECUTIVE_ACK_MISSES = 8;
 
 class DfuTransport {
   constructor(port, logFn) {
@@ -336,6 +340,9 @@ class DfuTransport {
     const total = firmware.length;
     let sent = 0;
     let chunkIdx = 0;
+    let ackOk = 0;              // data packets the bootloader acknowledged
+    let ackMissed = 0;          // total misses, reported at the end
+    let ackMissedRun = 0;       // consecutive misses — the dead-link signal
     for (let i = 0; i < total; i += DFU_PACKET_MAX_SIZE) {
       const chunk = firmware.subarray(i, Math.min(i + DFU_PACKET_MAX_SIZE, total));
       const payload = [
@@ -349,10 +356,31 @@ class DfuTransport {
       // flasher, whose send() ignores the ack result entirely. START and
       // INIT still require an ack (sendStartDfu/sendInitPacket throw), so
       // a wrong or dead bootloader port still fails fast up front.
+      //
+      // Tolerating a miss is right; tolerating EVERY miss is not. START
+      // erased the application, so from here until STOP the device has
+      // no firmware. If the bootloader stops listening mid-stream (USB
+      // stall, receive-buffer overrun, spontaneous reset) the old code
+      // streamed the remainder into a void, ran the progress bar to
+      // 100%, and reported success — leaving a board stranded in the
+      // bootloader with nothing to boot and a UI that said it worked.
+      // Recovering that needs physical access to double-tap reset.
       try {
         await this.sendHciPacket(payload);
+        ackOk++;
+        ackMissedRun = 0;
       } catch (e) {
+        ackMissed++;
+        ackMissedRun++;
         if (!this._warnedAck) { this.log('info', 'data ack slow/missed — continuing (non-fatal)'); this._warnedAck = true; }
+        if (ackMissedRun >= MAX_CONSECUTIVE_ACK_MISSES) {
+          throw new Error(
+            'bootloader stopped responding after ' + sent + '/' + total + ' bytes (' +
+            ackMissedRun + ' consecutive missed acks, ~' +
+            Math.round((ackMissedRun * ACK_TIMEOUT_MS) / 1000) + 's of silence). ' +
+            'The device is still in the bootloader with no application — ' +
+            'double-tap reset and flash again.');
+        }
       }
 
       sent = Math.min(i + chunk.length, total);
@@ -363,6 +391,21 @@ class DfuTransport {
       // settle and its USB receive buffer doesn't overrun. 5 ms every 8
       // chunks matches the proven agnostic-lora-net flasher.
       if (chunkIdx % 8 === 0) await sleep(5);
+    }
+
+    // Not one acknowledged packet across the whole stream means the
+    // bootloader was never on the other end — a wrong port, or a device
+    // that reset during the erase. Treat that as the failure it is
+    // rather than proceeding to STOP and declaring success.
+    if (ackOk === 0) {
+      throw new Error(
+        'no data packet was acknowledged across the entire transfer — ' +
+        'the bootloader was not listening. The device is still in the ' +
+        'bootloader with no application; double-tap reset and flash again.');
+    }
+    if (ackMissed > 0) {
+      this.log('info', 'transfer completed with ' + ackMissed + ' missed ack(s) of ' +
+                       (ackOk + ackMissed) + ' packets');
     }
     await sleep(1);
   }
