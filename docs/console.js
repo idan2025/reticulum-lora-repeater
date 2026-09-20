@@ -665,9 +665,24 @@ class RLRConsole {
   }
 
   // Build pipe string from form values (matches firmware field order)
+  //
+  // PIPE_FIELDS covers the whole record, but the form does not own
+  // every field in it — batt_mult is staged on the device by CALIBRATE
+  // BATTERY and never appears in formValues(). The BLE path writes all
+  // fields in one shot, so anything the form omits used to go out as an
+  // empty field, which set_field() rejects ("batt_mult must be a
+  // number") on every single BLE commit. Fall back to the value last
+  // read from the device so the record round-trips intact.
+  //
+  // Commit runs validateForm() first, so by this point no form-owned
+  // field is blank and the fallback only ever fires for fields the form
+  // genuinely doesn't carry.
   function buildPipeString(vals) {
     const fields = RLRConsole.PIPE_FIELDS;
-    return fields.map(f => String(vals[f] || '')).join('|');
+    return fields.map((f) => {
+      const v = (vals[f] === undefined || vals[f] === '') ? originalCfg[f] : vals[f];
+      return (v === undefined || v === null) ? '' : String(v);
+    }).join('|');
   }
 
   $('btn-commit').addEventListener('click', async () => {

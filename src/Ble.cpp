@@ -155,6 +155,7 @@ static void _on_config_write(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t*
 
     // Split on '|' and apply each field
     Config& staging = rlr::serial_console::staging();
+    unsigned rejected = 0;
     char* p = buf;
     for (size_t i = 0; i < NUM_KEYS; i++) {
         char* next = strchr(p, '|');
@@ -162,16 +163,36 @@ static void _on_config_write(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t*
 
         const char* err = config::set_field(staging, keys[i], p);
         if (err) {
+            // Report to the NUS log stream as well as USB serial. A
+            // rejected field leaves its old value in staging and the
+            // commit still goes through, so without this the operator
+            // sees a successful commit over BLE and no hint that one
+            // field silently did not take.
+            rejected++;
             Serial.print("BLE CONFIG write: ");
             Serial.print(keys[i]);
             Serial.print(" error: ");
             Serial.println(err);
+            s_ble_print.print("ERR: ");
+            s_ble_print.print(keys[i]);
+            s_ble_print.print(": ");
+            s_ble_print.println(err);
         }
 
         if (next) p = next + 1;
         else break;
     }
-    Serial.println("BLE: config staged via GATT write");
+    if (rejected > 0) {
+        Serial.print("BLE: config staged with ");
+        Serial.print(rejected);
+        Serial.println(" rejected field(s)");
+        s_ble_print.print("WARN: ");
+        s_ble_print.print(rejected);
+        s_ble_print.println(" field(s) rejected — those keep their previous value");
+        s_ble_print.flush();
+    } else {
+        Serial.println("BLE: config staged via GATT write");
+    }
 }
 
 static void _on_commit_write(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
