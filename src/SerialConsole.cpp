@@ -327,7 +327,15 @@ void init(Config& live) {
 }
 
 void tick() {
-    while (Serial.available() > 0) {
+    // Bound the work done in one pass. Bytes keep arriving from the USB
+    // CDC interrupt while we drain, so an unbounded while(available())
+    // can keep this function running for as long as a host keeps
+    // writing — and every millisecond spent here is a millisecond
+    // loop() is not forwarding LoRa packets. The line buffer is
+    // file-scope state, so a command split across two passes still
+    // assembles correctly.
+    size_t budget = 256;
+    while (budget-- > 0 && Serial.available() > 0) {
         int c = Serial.read();
         if (c < 0) break;
 

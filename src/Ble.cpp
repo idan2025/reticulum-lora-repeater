@@ -91,6 +91,16 @@ static BlePrint  s_ble_print;
 // ---- state -------------------------------------------------------
 
 static bool     s_active = false;
+// millis() of the last GATT interaction, used by tick() to drop an idle
+// link. main::loop() pauses the whole LoRa transport while BLE is
+// connected (SPI transactions starve the SoftDevice), so a client that
+// connects and then goes away — a forgotten browser tab, a phone in a
+// pocket — silently takes the repeater off the air for as long as the
+// link survives. Nothing else ever closes it.
+static uint32_t s_last_activity_ms = 0;
+// Generous enough that nobody configuring a node hits it by accident,
+// short enough that a forgotten session doesn't cost a day of uptime.
+static constexpr uint32_t BLE_IDLE_TIMEOUT_MS = 600000UL;   // 10 minutes
 // s_connected declared above BlePrint (forward ref needed by the class)
 static uint16_t s_conn_handle = BLE_CONN_HANDLE_INVALID;
 static bool     s_require_mitm = false;
@@ -130,11 +140,16 @@ static size_t _build_pipe(char* buf, size_t bufsize) {
     return n;
 }
 
+// Called from every GATT callback so an actively-used session is never
+// reaped by the idle timeout in tick().
+static void _mark_activity() { s_last_activity_ms = millis(); }
+
 // ---- GATT callbacks ----------------------------------------------
 
 static void _on_config_write(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
     (void)conn_hdl;
     (void)chr;
+    _mark_activity();
 
     // Parse pipe-delimited config string and set each field.
     // Field order must match PIPE_FIELDS in console.js and print_fields_pipe.
@@ -198,6 +213,7 @@ static void _on_config_write(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t*
 static void _on_commit_write(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
     (void)conn_hdl;
     (void)chr;
+    _mark_activity();
     if (len < 1 || data[0] != 0x01) return;
 
     Config& staging = rlr::serial_console::staging();
@@ -218,6 +234,7 @@ static void _on_commit_write(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t*
 static void _on_command_write(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
     (void)conn_hdl;
     (void)chr;
+    _mark_activity();
 
     char cmd[64];
     size_t n = len < sizeof(cmd) - 1 ? len : sizeof(cmd) - 1;
@@ -269,6 +286,7 @@ static void _on_secured(uint16_t conn_handle) {
     if (s_require_mitm) {
         if (mode.sm >= 1 && mode.lv >= 3) {
             s_connected = true;
+            _mark_activity();
             Serial.println("BLE: MITM authenticated, ready");
         } else {
             Serial.println("BLE: insufficient security, disconnecting");
@@ -276,6 +294,7 @@ static void _on_secured(uint16_t conn_handle) {
         }
     } else {
         s_connected = true;
+        _mark_activity();
         Serial.println("BLE: connected (no PIN required)");
     }
 
@@ -431,8 +450,20 @@ bool init(const Config& cfg) {
 }
 
 void tick() {
-    // No polling needed — all config operations are GATT callback-driven.
-    // NUS TX is write-only from our side (log stream from dispatch_line).
+    // Config operations are all GATT callback-driven, so there is
+    // nothing to poll for — but the idle timeout has to be enforced
+    // somewhere, and loop() calls this every pass.
+    //
+    // Dropping an idle link is what puts the repeater back on the air:
+    // main::loop() skips transport::tick() entirely while BLE is
+    // connected, so without this a forgotten session keeps the node
+    // from forwarding anything for as long as the link holds.
+    if (s_connected && s_conn_handle != BLE_CONN_HANDLE_INVALID &&
+        (millis() - s_last_activity_ms) > BLE_IDLE_TIMEOUT_MS) {
+        Serial.println("BLE: idle timeout, disconnecting to resume repeating");
+        Bluefruit.disconnect(s_conn_handle);
+        // _on_disconnect() clears s_connected and s_conn_handle.
+    }
 }
 
 bool active() {
