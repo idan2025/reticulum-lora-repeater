@@ -166,6 +166,7 @@ The hosted web app at https://idan2025.github.io/reticulum-lora-repeater/ provid
 - **Flash firmware** directly from the browser via Web Serial DFU
 - **Connect USB** or **Connect BLE** to configure the node
 - **Configuration form** with validation and human-friendly units
+- **Reload from device** — re-read the live config into the form without reconnecting
 - **Battery calibration** — enter a multimeter voltage, firmware computes the multiplier
 - **Config export/import** — save/load `rlr-config.json` for fleet provisioning
 - **"Use my location" button** — auto-populate lat/lon/altitude from browser GPS

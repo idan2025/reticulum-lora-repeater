@@ -34,6 +34,11 @@ class RLRConsole {
 
   isConnected() { return this.port !== null; }
 
+  // Upper bound on lines buffered in lineQueue. Commands drain the
+  // queue before they write, so this only ever holds async firmware
+  // chatter; a few hundred lines is far more than any response needs.
+  static get MAX_QUEUED_LINES() { return 200; }
+
   async connect() {
     if (!('serial' in navigator)) throw new Error('Web Serial not supported in this browser');
     this.port = await navigator.serial.requestPort();
@@ -97,6 +102,15 @@ class RLRConsole {
       // in real time without needing PlatformIO's serial monitor.
       if (this.onUnsolicited) this.onUnsolicited(line);
       this.lineQueue.push(line);
+      // The queue only exists to bridge lines that land between a
+      // command's write and its collector picking them up. Unsolicited
+      // log output has no reader, so on a chatty node it otherwise
+      // accumulates here for the whole life of the connection — a
+      // session left open on the Configure tab grows without bound
+      // until the tab needs a reload. Keep only a recent window.
+      if (this.lineQueue.length > RLRConsole.MAX_QUEUED_LINES) {
+        this.lineQueue.splice(0, this.lineQueue.length - RLRConsole.MAX_QUEUED_LINES);
+      }
     }
   }
 
@@ -429,7 +443,8 @@ class RLRConsole {
 
   // All action buttons that should be disabled during loading
   const actionButtons = ['btn-commit', 'btn-revert', 'btn-reset', 'btn-export',
-    'btn-import', 'btn-reboot', 'btn-status', 'btn-announce', 'btn-calibrate'];
+    'btn-import', 'btn-reboot', 'btn-status', 'btn-announce', 'btn-calibrate',
+    'btn-reload'];
 
   function setLoading(on) {
     const overlay = $('loading-overlay');
@@ -482,28 +497,46 @@ class RLRConsole {
   // Config loading ------------------------------------------------
 
   let originalCfg = {};
+
+  // Firmware reports every field as a string, and 0 is a legal value
+  // for several of them (txp_dbm, log_level, the intervals). The
+  // `c.field || fallback` idiom silently rewrites those zeros into the
+  // fallback, so the form shows a value the device does not actually
+  // hold — and the next Commit writes that wrong value back. Fall back
+  // only when the field is genuinely absent or empty.
+  function fld(v, fallback) {
+    return (v === undefined || v === null || v === '') ? fallback : String(v);
+  }
+  // Same rule, for fields displayed in converted units.
+  function fldScaled(v, scale, digits) {
+    if (v === undefined || v === null || v === '') return '';
+    const n = Number(v) / scale;
+    if (!Number.isFinite(n)) return '';
+    return digits > 0 ? n.toFixed(digits) : String(Math.round(n));
+  }
+
   async function refreshConfig() {
     const c = await con.configGet();
     originalCfg = { ...c };
-    $('cfg-display_name').value     = c.display_name || '';
-    $('cfg-freq_mhz').value         = c.freq_hz ? (Number(c.freq_hz) / 1000000).toFixed(3) : '';
-    $('cfg-bw_hz').value            = String(c.bw_hz || '');
-    $('cfg-sf').value               = String(c.sf || '');
-    $('cfg-cr').value               = String(c.cr || '');
-    $('cfg-txp_dbm').value          = String(c.txp_dbm || '');
+    $('cfg-display_name').value     = fld(c.display_name, '');
+    $('cfg-freq_mhz').value         = fldScaled(c.freq_hz, 1000000, 3);
+    $('cfg-bw_hz').value            = fld(c.bw_hz, '');
+    $('cfg-sf').value               = fld(c.sf, '');
+    $('cfg-cr').value               = fld(c.cr, '');
+    $('cfg-txp_dbm').value          = fld(c.txp_dbm, '');
     $('cfg-tx_enabled').checked     = Number(c.tx_enabled) === 1;
-    $('cfg-tele_interval_min').value = c.tele_interval_ms ? Math.round(Number(c.tele_interval_ms) / 60000) : '';
-    $('cfg-lxmf_interval_min').value = c.lxmf_interval_ms ? Math.round(Number(c.lxmf_interval_ms) / 60000) : '';
+    $('cfg-tele_interval_min').value = fldScaled(c.tele_interval_ms, 60000, 0);
+    $('cfg-lxmf_interval_min').value = fldScaled(c.lxmf_interval_ms, 60000, 0);
     $('cfg-telemetry').checked      = Number(c.telemetry) === 1;
     $('cfg-lxmf').checked           = Number(c.lxmf) === 1;
     $('cfg-heartbeat').checked      = Number(c.heartbeat) === 1;
     $('cfg-bt_enabled').checked     = Number(c.bt_enabled) === 1;
-    $('cfg-bt_pin').value           = String(c.bt_pin || '0');
-    $('cfg-latitude').value         = String(c.latitude || '0.000000');
-    $('cfg-longitude').value        = String(c.longitude || '0.000000');
-    $('cfg-altitude').value         = String(c.altitude || '0');
-    $('cfg-log_level').value        = String(c.log_level || '1');
-    $('cfg-collector').value        = c.collector || '';
+    $('cfg-bt_pin').value           = fld(c.bt_pin, '0');
+    $('cfg-latitude').value         = fld(c.latitude, '0.000000');
+    $('cfg-longitude').value        = fld(c.longitude, '0.000000');
+    $('cfg-altitude').value         = fld(c.altitude, '0');
+    $('cfg-log_level').value        = fld(c.log_level, '1');
+    $('cfg-collector').value        = fld(c.collector, '');
     // Normalize blank collector to 'none' for change-detection so an
     // unset field doesn't spuriously diff against the blank→'none'
     // mapping in formValues() (firmware rejects an empty SET value).
@@ -665,6 +698,12 @@ class RLRConsole {
         }
         for (const [k, v] of changes) {
           await con.configSet(k, v);
+          // Record each field the moment it lands. If a later SET
+          // fails, originalCfg still describes the device's real
+          // staging, so retrying Commit resends exactly what is left
+          // instead of diffing against pre-edit values and skipping
+          // the fields that already applied.
+          originalCfg[k] = v;
         }
         await con.configCommit();
       }
@@ -678,6 +717,24 @@ class RLRConsole {
       }, 500);
     } catch (e) {
       log('err', 'commit failed: ' + e.message);
+    }
+  });
+
+  // Re-read the live config into the form without dropping the
+  // connection. The form is otherwise only populated at connect time,
+  // so anything that moves the device's config out from under it — a
+  // reboot, a second client, a BLE reconnect — used to leave a stale
+  // form that could only be fixed by disconnecting or reloading the page.
+  $('btn-reload').addEventListener('click', async () => {
+    if (!con.isConnected()) { log('err', 'not connected'); return; }
+    setLoading(true);
+    try {
+      await refreshConfig();
+      log('ok', 'config reloaded from device');
+    } catch (e) {
+      log('err', 'reload failed: ' + e.message);
+    } finally {
+      setLoading(false);
     }
   });
 
