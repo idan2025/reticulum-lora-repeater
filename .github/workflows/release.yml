@@ -77,15 +77,24 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          # On tag push GITHUB_REF_NAME is the tag (v0.1.0-test, ...).
-          # On workflow_dispatch it's the branch name (master) which
-          # would produce misleading artifact names, so substitute a
-          # timestamp so dispatch runs are obviously smoke-test builds
-          # rather than anything release-adjacent.
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            VERSION="manual-$(date +%Y%m%d-%H%M%S)"
-          else
+          # Name assets after the tag whenever we are building one.
+          #
+          # Branch on the REF TYPE, not the event: a workflow_dispatch
+          # aimed at a tag has GITHUB_REF_NAME set to that tag, and it
+          # is the only way to cut a release in a fork, where GitHub
+          # does not deliver push events to Actions at all. Keying off
+          # the event name instead stamped those builds
+          # "manual-<timestamp>", which does not match the vX.Y.Z shape
+          # ASSET_RE expects in scripts/gen_firmware_manifest.py — so
+          # the release directory scanned to zero boards and the tag
+          # was silently left out of the webflasher manifest.
+          #
+          # A dispatch against a branch still gets the timestamp, so
+          # smoke-test builds stay obviously non-release.
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             VERSION="${GITHUB_REF_NAME}"
+          else
+            VERSION="manual-$(date +%Y%m%d-%H%M%S)"
           fi
           BOARD="${{ matrix.board }}"
           BASE="reticulum-lora-repeater-${BOARD}-${VERSION}"
