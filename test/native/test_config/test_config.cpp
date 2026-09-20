@@ -21,7 +21,8 @@
 #pragma pack(push, 1)
 struct Config {
     uint16_t version;
-    uint16_t _reserved;
+    uint8_t  log_level;            // v3 splits v1/v2's 2-byte _reserved
+    uint8_t  _reserved;            //   into log_level + 1 spare byte
     uint32_t freq_hz;
     uint32_t bw_hz;
     uint8_t  sf;
