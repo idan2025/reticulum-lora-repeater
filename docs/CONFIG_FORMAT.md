@@ -51,8 +51,8 @@ See `src/Config.h` for the canonical definition.
 | `txp_dbm` | dBm | Target output power at the SX1262 core pin (not the antenna — external PAs add their own gain). Range -9..+22 on SX1262. |
 | `flags` | bitmask | Bit 0 = telemetry, 1 = LXMF presence, 2 = heartbeat, 3 = BT enabled, 4 = **TX disabled** (stored inverted — see `tx_enabled` below). |
 | `batt_mult` | — | Raw-ADC → millivolts scaling factor. **Must be calibrated per-board with a multimeter.** |
-| `tele_interval_ms` | ms | Between LXMF telemetry pushes to the collector. Default 3 h. |
-| `lxmf_interval_ms` | ms | Between LXMF presence announces. Default 30 min. |
+| `tele_interval_ms` | ms | Between LXMF telemetry pushes to the collector. Default 3 h. `0` = off, otherwise 10 s – 7 days. |
+| `lxmf_interval_ms` | ms | Between LXMF presence announces. Default 30 min. `0` = off, otherwise 10 s – 7 days. |
 | `display_name` | UTF-8 | NUL-terminated, max 31 bytes of content. What MeshChat / Sideband show. |
 | `collector_hash` | 16 bytes | Recipient `lxmf.delivery` destination hash for telemetry pushes (`FIELD_TELEMETRY`). All-zero = telemetry disabled. Set via the `collector` key (32 hex chars, or `none` to clear). Added in schema **v3**. |
 | `tx_enabled` | on/off | Whether transmission is allowed. Backed by `flags` bit 4 (stored inverted as TX-disabled). **A fresh flash boots receive-only** (`tx_enabled = 0`) so the device never transmits on a potentially-illegal default frequency; set a region-legal `freq_hz` then `tx_enabled = 1`. The inverted encoding means an existing saved config (bit clear) keeps TX enabled across a firmware upgrade. |
