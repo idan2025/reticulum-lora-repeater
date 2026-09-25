@@ -148,6 +148,37 @@ bool Reader::bytes(const uint8_t*& out, size_t& len) {
     return take(len, out);
 }
 
+bool Reader::number(double& out) {
+    const uint8_t* t;
+    if (!take(1, t)) return false;
+    const uint8_t c = *t;
+    uint32_t hi, lo;
+    if (c <= 0x7f) { out = c; return true; }                        // positive fixint
+    if (c >= 0xe0) { out = (int8_t)c; return true; }                // negative fixint
+    switch (c) {
+        case 0xcb: {                                                // float64
+            if (!be(4, hi) || !be(4, lo)) return false;
+            uint64_t bits = ((uint64_t)hi << 32) | lo;
+            double d; memcpy(&d, &bits, sizeof(d)); out = d; return true;
+        }
+        case 0xca: {                                                // float32
+            if (!be(4, lo)) return false;
+            float f; memcpy(&f, &lo, sizeof(f)); out = f; return true;
+        }
+        case 0xcc: if (!be(1, lo)) return false; out = lo; return true;
+        case 0xcd: if (!be(2, lo)) return false; out = lo; return true;
+        case 0xce: if (!be(4, lo)) return false; out = lo; return true;
+        case 0xcf: if (!be(4, hi) || !be(4, lo)) return false;
+                   out = (double)(((uint64_t)hi << 32) | lo); return true;
+        case 0xd0: if (!be(1, lo)) return false; out = (int8_t)lo;  return true;
+        case 0xd1: if (!be(2, lo)) return false; out = (int16_t)lo; return true;
+        case 0xd2: if (!be(4, lo)) return false; out = (int32_t)lo; return true;
+        case 0xd3: if (!be(4, hi) || !be(4, lo)) return false;
+                   out = (double)(int64_t)(((uint64_t)hi << 32) | lo); return true;
+    }
+    return false;
+}
+
 bool Reader::skip() { return skip_depth(0); }
 
 bool Reader::skip_depth(int depth) {

@@ -17,11 +17,14 @@ bool unpack(const uint8_t* data, size_t len, Message& out) {
     out.dest_hash   = data;
     out.source_hash = data + HASH_LEN;
     out.content[0]  = '\0';
+    out.timestamp   = 0.0;
 
     msgpack::Reader r(data + header, len - header);
     size_t n;
     if (!r.array_header(n) || n < 4) return false;   // [ts, title, content, fields(, stamp)]
-    if (!r.skip()) return false;                     // timestamp
+    double ts;
+    if (!r.number(ts)) return false;                 // timestamp
+    out.timestamp = ts;
 
     const uint8_t* p;
     size_t plen;

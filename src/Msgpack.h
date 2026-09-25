@@ -93,6 +93,9 @@ public:
     // str or bin family: points `out` into the buffer, no copy.
     bool bytes(const uint8_t*& out, size_t& len);
 
+    // Any numeric value (float64/32, signed/unsigned int) as a double.
+    bool number(double& out);
+
     // Skip one complete value of any type, including nested containers.
     bool skip();
 

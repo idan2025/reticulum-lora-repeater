@@ -35,10 +35,27 @@ namespace rlr { namespace lxmf {
 static constexpr size_t HASH_LEN = 16;   // truncated destination hash
 static constexpr size_t SIG_LEN  = 64;   // Ed25519 signature
 
+static constexpr double MIN_PLAUSIBLE_UNIX = 1577836800.0;   // 2020-01-01
+static double s_clock_offset = 0.0;    // unix seconds minus uptime seconds
+static bool   s_clock_set    = false;
+
+static double uptime_s() { return (double)millis() / 1000.0; }
+
+void observe_time(double unix_ts) {
+    if (!(unix_ts >= MIN_PLAUSIBLE_UNIX && unix_ts < 4102444800.0)) return;   // 2020..2100
+    s_clock_offset = unix_ts - uptime_s();
+    s_clock_set    = true;
+}
+
+double now() {
+    return s_clock_set ? uptime_s() + s_clock_offset : uptime_s();
+}
+
 bool pack(const uint8_t* dest_hash,
           const char* content,
           const uint8_t* fields_msgpack, size_t fields_len,
-          std::vector<uint8_t>& out) {
+          std::vector<uint8_t>& out,
+          double timestamp) {
     if (dest_hash == nullptr) return false;
 
     // --- our own lxmf.delivery destination hash = source_hash (§5.4) ---
@@ -56,10 +73,9 @@ bool pack(const uint8_t* dest_hash,
     msgpack::Writer payload;
     payload.reserve(32 + body_len + fields_len);
     payload.array_header(4);
-    // No wall clock on this hardware (no RTC/GPS time) — emit a
-    // monotonic uptime-seconds value. Sideband renders the message
-    // against its own receive clock, so this is metadata only.
-    payload.float64((double)millis() / 1000.0);
+    // No RTC: now() is unix time learned from inbound LXMF traffic, or
+    // uptime seconds until any has been heard (see observe_time()).
+    payload.float64(timestamp > 0.0 ? timestamp : now());
     payload.bin(nullptr, 0);                       // empty title (bin8 len 0)
     payload.bin((const uint8_t*)body_text, body_len);
     if (fields_msgpack && fields_len > 0) {
@@ -108,7 +124,8 @@ bool pack(const uint8_t* dest_hash,
 
 bool send_opportunistic(const uint8_t* collector_hash,
                         const char* content,
-                        const uint8_t* fields_msgpack, size_t fields_len) {
+                        const uint8_t* fields_msgpack, size_t fields_len,
+                        double timestamp) {
     if (collector_hash == nullptr) return false;
 
     try {
@@ -123,7 +140,7 @@ bool send_opportunistic(const uint8_t* collector_hash,
         }
 
         std::vector<uint8_t> msg;
-        if (!pack(collector_hash, content, fields_msgpack, fields_len, msg)) return false;
+        if (!pack(collector_hash, content, fields_msgpack, fields_len, msg, timestamp)) return false;
 
         // Opportunistic body omits the destination hash — it is the
         // outer packet's destination (§5.1).
@@ -148,10 +165,11 @@ bool send_opportunistic(const uint8_t* collector_hash,
     }
 }
 
-bool send_over_link(const RNS::Link& link, const uint8_t* dest_hash, const char* content) {
+bool send_over_link(const RNS::Link& link, const uint8_t* dest_hash, const char* content,
+                    double timestamp) {
     try {
         std::vector<uint8_t> msg;
-        if (!pack(dest_hash, content, nullptr, 0, msg)) return false;
+        if (!pack(dest_hash, content, nullptr, 0, msg, timestamp)) return false;
         // Over a link the whole message, destination hash included, is
         // the packet data — the receiver's delivery_packet() takes it as-is.
         RNS::Packet packet(link, RNS::Bytes(msg.data(), msg.size()));

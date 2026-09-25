@@ -25,6 +25,7 @@ enum class Command { NONE, STATUS, BATTERY, HELP };
 struct Message {
     const uint8_t* dest_hash;              // points into the input buffer
     const uint8_t* source_hash;            // points into the input buffer
+    double         timestamp;              // sender's clock, unix seconds (0 if absent)
     char           content[MAX_CONTENT + 1];
 };
 

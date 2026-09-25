@@ -65,6 +65,7 @@ struct Pending {
     uint8_t   src[HASH_LEN];
     Command   cmd = Command::NONE;
     uint32_t  t0 = 0;
+    double    req_ts = 0.0;               // sender's timestamp on the command
     bool      path_requested = false;
     RNS::Link link{RNS::Type::NONE};
 };
@@ -127,6 +128,9 @@ static void handle_message(const uint8_t* data, size_t len, const RNS::Link& lin
     Message msg;
     if (!unpack(data, len, msg)) return;
 
+    // Any sender's clock is better than none (the board has no RTC).
+    rlr::lxmf::observe_time(msg.timestamp);
+
     Command cmd = match(msg.content);
     if (cmd == Command::NONE) return;   // not for us — stay off the air
 
@@ -151,6 +155,7 @@ static void handle_message(const uint8_t* data, size_t len, const RNS::Link& lin
         memcpy(p.src, msg.source_hash, HASH_LEN);
         p.cmd = cmd;
         p.t0 = millis();
+        p.req_ts = msg.timestamp;
         p.path_requested = false;
         p.link = link;
         return;
@@ -253,6 +258,15 @@ static bool backchannel_ready(Pending& p) {
     return h.size() == HASH_LEN && memcmp(h.data(), p.src, HASH_LEN) == 0;
 }
 
+// Clients order a conversation by message timestamp, so the reply must
+// be stamped after the command in the *sender's* clock: its timestamp
+// plus the time we held the reply, plus a second of margin. Falls back
+// to the learned clock if the command carried no usable timestamp.
+static double reply_timestamp(const Pending& p, uint32_t now) {
+    if (p.req_ts < 1577836800.0) return 0.0;   // absent or not a real clock (< 2020)
+    return p.req_ts + (double)(uint32_t)(now - p.t0) / 1000.0 + 1.0;
+}
+
 // Try to move one pending reply forward. Returns true if it transmitted.
 static bool service(Pending& p, uint32_t now) {
     uint32_t age = now - p.t0;
@@ -260,7 +274,7 @@ static bool service(Pending& p, uint32_t now) {
 
     if (backchannel_ready(p)) {
         render(p.cmd, text, sizeof(text));
-        rlr::lxmf::send_over_link(p.link, p.src, text);
+        rlr::lxmf::send_over_link(p.link, p.src, text, reply_timestamp(p, now));
         p.used = false;
         p.link = RNS::Link{RNS::Type::NONE};
         return true;
@@ -276,7 +290,7 @@ static bool service(Pending& p, uint32_t now) {
 
     if (known && (path || age >= REPLY_GIVE_UP_MS / 2)) {
         render(p.cmd, text, sizeof(text));
-        rlr::lxmf::send_opportunistic(p.src, text, nullptr, 0);
+        rlr::lxmf::send_opportunistic(p.src, text, nullptr, 0, reply_timestamp(p, now));
         p.used = false;
         p.link = RNS::Link{RNS::Type::NONE};
         return true;

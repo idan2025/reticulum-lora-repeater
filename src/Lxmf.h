@@ -44,7 +44,18 @@ static constexpr size_t MAX_OPPORTUNISTIC_PAYLOAD = 295;
 // Diagnostic detail is printed to Serial.
 bool send_opportunistic(const uint8_t* collector_hash,
                         const char* content,
-                        const uint8_t* fields_msgpack, size_t fields_len);
+                        const uint8_t* fields_msgpack, size_t fields_len,
+                        double timestamp = 0.0);
+
+// Wall clock. The board has no RTC, so outgoing timestamps used to be
+// uptime seconds — a 1970 date that clients sort above everything else.
+// Every inbound LXMF message carries the sender's unix time; feeding it
+// here gives later messages a real timestamp. Implausible values
+// (before 2020) are ignored.
+void observe_time(double unix_ts);
+
+// Current unix time estimate, or uptime seconds if never observed.
+double now();
 
 // Build and sign a full LXMF message from this node to dest_hash:
 // dest(16) || source(16) || signature(64) || msgpack payload. Fails if
@@ -52,11 +63,13 @@ bool send_opportunistic(const uint8_t* collector_hash,
 bool pack(const uint8_t* dest_hash,
           const char* content,
           const uint8_t* fields_msgpack, size_t fields_len,
-          std::vector<uint8_t>& out);
+          std::vector<uint8_t>& out,
+          double timestamp = 0.0);   // 0 = now()
 
 // Send a text message to dest_hash as a packet over an established
 // link (LXMF DIRECT delivery, used for replies on the link a sender
 // opened to us). Returns true if a packet was handed to the link.
-bool send_over_link(const RNS::Link& link, const uint8_t* dest_hash, const char* content);
+bool send_over_link(const RNS::Link& link, const uint8_t* dest_hash, const char* content,
+                    double timestamp = 0.0);
 
 } } // namespace rlr::lxmf

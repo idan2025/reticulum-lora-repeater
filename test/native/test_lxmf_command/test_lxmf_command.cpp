@@ -28,6 +28,8 @@ static void test_unpack_status() {
     TEST_ASSERT_EQUAL_STRING("/status", m.content);
     TEST_ASSERT_EQUAL_MEMORY(LXMF_SOURCE_HASH, m.source_hash, HASH_LEN);
     TEST_ASSERT_EQUAL_MEMORY(LXMF_DEST_HASH, m.dest_hash, HASH_LEN);
+    // Reference LXMF stamps time.time(); replies are ordered after it.
+    TEST_ASSERT_TRUE(m.timestamp > 1.7e9 && m.timestamp < 4.1e9);
 }
 
 static void test_unpack_trims_and_skips_title() {
@@ -82,6 +84,21 @@ static void test_reader_skips_nested() {
     TEST_ASSERT_EQUAL(3, len);
     TEST_ASSERT_TRUE(r.skip());
     TEST_ASSERT_EQUAL(0, r.remaining());
+}
+
+static void test_reader_number() {
+    msgpack::Writer w;
+    w.float64(1790000000.25); w.uint(200); w.uint(70000); w.integer(-5); w.integer(-40000);
+    msgpack::Reader r(w.data(), w.size());
+    double d;
+    TEST_ASSERT_TRUE(r.number(d)); TEST_ASSERT_TRUE(d == (1790000000.25));
+    TEST_ASSERT_TRUE(r.number(d)); TEST_ASSERT_TRUE(d == (200));
+    TEST_ASSERT_TRUE(r.number(d)); TEST_ASSERT_TRUE(d == (70000));
+    TEST_ASSERT_TRUE(r.number(d)); TEST_ASSERT_TRUE(d == (-5));
+    TEST_ASSERT_TRUE(r.number(d)); TEST_ASSERT_TRUE(d == (-40000));
+    const uint8_t not_a_number[] = {0xa1, 'x'};
+    msgpack::Reader r2(not_a_number, sizeof(not_a_number));
+    TEST_ASSERT_FALSE(r2.number(d));
 }
 
 static void test_reader_rejects_oversized_counts() {
@@ -193,6 +210,7 @@ int main(int, char**) {
     RUN_TEST(test_unpack_rejects_every_truncation);
     RUN_TEST(test_unpack_rejects_garbage);
     RUN_TEST(test_reader_skips_nested);
+    RUN_TEST(test_reader_number);
     RUN_TEST(test_reader_rejects_oversized_counts);
     RUN_TEST(test_reader_depth_limit);
     RUN_TEST(test_match);
