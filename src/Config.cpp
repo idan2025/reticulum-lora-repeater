@@ -440,7 +440,18 @@ bool save(const Config& in) {
 //      overwritten — if that ever becomes a problem in production
 //      we can add a "/config.bin.bak" rescue slot.
 void load_or_defaults(Config& out) {
-    if (load(out)) return;
+    if (load(out)) {
+#if defined(LEGACY_CONFIG_BATT_MULT)
+        // The board's old default batt_mult paired with a wrong battery
+        // pin, so a stored value still equal to it was never calibrated.
+        // Swap in the current default; the next CONFIG COMMIT persists it.
+        if (out.batt_mult == LEGACY_CONFIG_BATT_MULT) {
+            out.batt_mult = DEFAULT_CONFIG_BATT_MULT;
+            Serial.println("Config: replaced legacy default batt_mult");
+        }
+#endif
+        return;
+    }
     Serial.println("Config: falling back to board defaults");
     defaults(out);
     // Persist the freshly-defaulted config so the next boot takes

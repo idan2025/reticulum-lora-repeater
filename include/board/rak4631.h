@@ -83,13 +83,20 @@
 #define PIN_VEXT_EN             37    // P1.05  ACTIVE HIGH — gates SX1262 3V3
 #define VEXT_SETTLE_MS          10
 
-// Battery sense. The RAK4631 WisCore wires a 1:3 voltage divider
-// from the battery rail into P0.04 (AIN2). AREF on this board is
-// 3.0 V, so the raw 12-bit ADC reading maps to mV via roughly
-// (adc / 4095) * 3000 * 3 = adc * 2.198 mV/LSB. Used as the
-// first-boot default for DEFAULT_CONFIG_BATT_MULT below; the
-// webflasher's CALIBRATE BATTERY flow will refine per-device.
-#define PIN_BATTERY             4     // P0.04
+// Battery sense. The RAK4631 WisCore feeds the battery rail through
+// a resistor divider into P0.05 (AIN3) — WB_A0 in the RAK BSP, which
+// defines PIN_VBAT as WB_A0, and PIN_A0/BATTERY_PIN in the Meshtastic
+// variant. An earlier revision of this header sampled P0.04 (AIN2),
+// which is not connected to the divider and read a floating ~150 LSB
+// (~0.4 V) regardless of battery state.
+//
+// We never call analogReference(), so the nRF52 core default applies:
+// internal 0.6 V reference with 1/6 gain = 3.6 V full scale, i.e.
+// 3600 / 4096 = 0.879 mV/LSB. RAK's divider compensation factor is
+// 1.73 (VBAT_DIVIDER_COMP in the RAK BSP examples, ADC_MULTIPLIER in
+// Meshtastic), giving 0.879 * 1.73 = 1.520 mV/LSB. CALIBRATE BATTERY
+// still refines this per-device.
+#define PIN_BATTERY             5     // P0.05 / AIN3
 #define BATTERY_ADC_RESOLUTION  12
 
 // LED — RAK4631 Green LED1 on P1.03 (pin 35 in pca10056 numbering).
@@ -102,12 +109,16 @@
 // the regulatory region. Matches the bench defaults we use for the
 // Faketec except for the TX power cap, which is lower here because
 // the RAK4631 has no external PA and the SX1262 core is the final
-// amplifier. batt_mult is a first guess for the 1:3 divider — user
-// runs CALIBRATE BATTERY <measured_mv> on first boot.
+// amplifier. batt_mult follows from the divider maths above — user
+// runs CALIBRATE BATTERY <measured_mv> on first boot to refine it.
 #define DEFAULT_CONFIG_FREQ_HZ          915000000UL
 #define DEFAULT_CONFIG_BW_HZ            125000UL
 #define DEFAULT_CONFIG_SF               10
 #define DEFAULT_CONFIG_CR               5
 #define DEFAULT_CONFIG_TXP_DBM          22
-#define DEFAULT_CONFIG_BATT_MULT        2.198f
+#define DEFAULT_CONFIG_BATT_MULT        1.520f
+// Default shipped with the old P0.04 pin choice. A stored batt_mult
+// that still equals it was never calibrated (it was scaling a floating
+// pin), so Config::load() swaps it for the new default on boot.
+#define LEGACY_CONFIG_BATT_MULT         2.198f
 #define DEFAULT_CONFIG_DISPLAY_NAME     "Rptr-RAK4631"
