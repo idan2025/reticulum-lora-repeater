@@ -19,6 +19,7 @@
 
 #include "LxmfPresence.h"
 #include "Radio.h"
+#include "LxmfInbox.h"
 
 #include <Arduino.h>
 #include <string.h>
@@ -36,7 +37,6 @@ static uint32_t         s_last_ms  = 0;
 static constexpr uint32_t FIRST_MS = 15000UL;   // 15 s after init
 
 bool init(const Config& cfg) {
-    (void)cfg;
     try {
         s_dest = RNS::Destination(
             RNS::Transport::identity(),
@@ -46,6 +46,7 @@ bool init(const Config& cfg) {
         s_ready = true;
         Serial.print("LxmfPresence: destination hash ");
         Serial.println(s_dest.hash().toHex().c_str());
+        rlr::lxmf_inbox::attach(s_dest, cfg);
         return true;
     }
     catch (const std::exception& e) {

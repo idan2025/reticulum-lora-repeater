@@ -108,4 +108,92 @@ void Writer::append(const uint8_t* data, size_t len) {
     if (len) _buf.insert(_buf.end(), data, data + len);
 }
 
+// ---- Reader -------------------------------------------------------
+
+bool Reader::take(size_t n, const uint8_t*& out) {
+    if ((size_t)(_end - _p) < n) return false;
+    out = _p;
+    _p += n;
+    return true;
+}
+
+bool Reader::be(size_t n, uint32_t& out) {
+    const uint8_t* b;
+    if (!take(n, b)) return false;
+    out = 0;
+    for (size_t i = 0; i < n; i++) out = (out << 8) | b[i];
+    return true;
+}
+
+bool Reader::array_header(size_t& n) {
+    const uint8_t* t;
+    if (!take(1, t)) return false;
+    uint32_t v;
+    if ((*t & 0xf0) == 0x90) { n = *t & 0x0f; return true; }
+    if (*t == 0xdc) { if (!be(2, v)) return false; n = v; return true; }
+    if (*t == 0xdd) { if (!be(4, v)) return false; n = v; return true; }
+    return false;
+}
+
+bool Reader::bytes(const uint8_t*& out, size_t& len) {
+    const uint8_t* t;
+    if (!take(1, t)) return false;
+    uint32_t v;
+    if ((*t & 0xe0) == 0xa0)            v = *t & 0x1f;              // fixstr
+    else if (*t == 0xd9 || *t == 0xc4) { if (!be(1, v)) return false; }
+    else if (*t == 0xda || *t == 0xc5) { if (!be(2, v)) return false; }
+    else if (*t == 0xdb || *t == 0xc6) { if (!be(4, v)) return false; }
+    else return false;
+    len = v;
+    return take(len, out);
+}
+
+bool Reader::skip() { return skip_depth(0); }
+
+bool Reader::skip_depth(int depth) {
+    // Nesting cap keeps a hostile payload from recursing off the stack.
+    if (depth > 8) return false;
+    const uint8_t* t;
+    if (!take(1, t)) return false;
+    const uint8_t c = *t;
+    const uint8_t* dummy;
+    uint32_t v;
+
+    if (c <= 0x7f || c >= 0xe0) return true;                       // fixint
+    if ((c & 0xe0) == 0xa0) return take(c & 0x1f, dummy);           // fixstr
+    if ((c & 0xf0) == 0x90 || (c & 0xf0) == 0x80) {                 // fixarray / fixmap
+        size_t n = (size_t)(c & 0x0f) * ((c & 0xf0) == 0x80 ? 2 : 1);
+        for (size_t i = 0; i < n; i++) if (!skip_depth(depth + 1)) return false;
+        return true;
+    }
+    switch (c) {
+        case 0xc0: case 0xc2: case 0xc3: return true;               // nil / bool
+        case 0xcc: case 0xd0: return take(1, dummy);
+        case 0xcd: case 0xd1: return take(2, dummy);
+        case 0xca: case 0xce: case 0xd2: return take(4, dummy);
+        case 0xcb: case 0xcf: case 0xd3: return take(8, dummy);
+        case 0xd4: return take(2, dummy);                           // fixext 1
+        case 0xd5: return take(3, dummy);
+        case 0xd6: return take(5, dummy);
+        case 0xd7: return take(9, dummy);
+        case 0xd8: return take(17, dummy);
+        case 0xc4: case 0xd9: return be(1, v) && take(v, dummy);
+        case 0xc5: case 0xda: return be(2, v) && take(v, dummy);
+        case 0xc6: case 0xdb: return be(4, v) && take(v, dummy);
+        case 0xc7: return be(1, v) && take(v + 1, dummy);           // ext 8
+        case 0xc8: return be(2, v) && take(v + 1, dummy);
+        case 0xc9: return be(4, v) && take(v + 1, dummy);
+        case 0xdc: case 0xdd: case 0xde: case 0xdf: {
+            if (!be((c == 0xdc || c == 0xde) ? 2 : 4, v)) return false;
+            size_t n = (c >= 0xde) ? (size_t)v * 2 : (size_t)v;
+            // Every element is at least one byte, so a count larger
+            // than what is left is malformed — reject before looping.
+            if (n > remaining()) return false;
+            for (size_t i = 0; i < n; i++) if (!skip_depth(depth + 1)) return false;
+            return true;
+        }
+    }
+    return false;
+}
+
 } } // namespace rlr::msgpack

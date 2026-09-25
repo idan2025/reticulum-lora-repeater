@@ -591,6 +591,13 @@ const char* set_field(Config& cfg, const char* key, const char* value) {
         else   cfg.flags |=  CONFIG_FLAG_TX_DISABLED;
         return nullptr;
     }
+    if (streq(key, "lxmf_commands")) {
+        bool b;
+        if (!parse_bool(value, b))           return "expected 0/1, true/false, on/off, yes/no";
+        if (b) cfg.flags &= ~CONFIG_FLAG_CMDS_DISABLED;
+        else   cfg.flags |=  CONFIG_FLAG_CMDS_DISABLED;
+        return nullptr;
+    }
     if (streq(key, "bt_pin")) {
         char* end = nullptr;
         unsigned long v = strtoul(value, &end, 10);
@@ -692,6 +699,7 @@ void print_fields(const Config& cfg, Print& out) {
     out.print("altitude=");         out.println(cfg.altitude_m);
     out.print("log_level=");       out.println(cfg.log_level);
     out.print("collector=");        print_collector_hex(cfg, out); out.println();
+    out.print("lxmf_commands=");    out.println(lxmf_commands_enabled(cfg) ? 1 : 0);
 }
 
 void print_fields_pipe(const Config& cfg, Print& out) {

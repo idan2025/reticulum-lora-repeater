@@ -17,6 +17,7 @@
 #include "Transport.h"
 #include "Telemetry.h"
 #include "LxmfPresence.h"
+#include "LxmfInbox.h"
 #include "SerialConsole.h"
 #include "Ble.h"
 
@@ -165,6 +166,7 @@ void loop() {
         rlr::transport::tick();
         rlr::telemetry::tick(g_config);
         rlr::lxmf_presence::tick(g_config);
+        rlr::lxmf_inbox::tick();
     }
     rlr::led::heartbeat_tick(g_config);
     rlr::serial_console::tick();

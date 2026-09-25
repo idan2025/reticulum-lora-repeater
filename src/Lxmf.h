@@ -18,6 +18,9 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <vector>
+
+namespace RNS { class Link; }
 
 namespace rlr { namespace lxmf {
 
@@ -42,5 +45,18 @@ static constexpr size_t MAX_OPPORTUNISTIC_PAYLOAD = 295;
 bool send_opportunistic(const uint8_t* collector_hash,
                         const char* content,
                         const uint8_t* fields_msgpack, size_t fields_len);
+
+// Build and sign a full LXMF message from this node to dest_hash:
+// dest(16) || source(16) || signature(64) || msgpack payload. Fails if
+// the payload would exceed MAX_OPPORTUNISTIC_PAYLOAD.
+bool pack(const uint8_t* dest_hash,
+          const char* content,
+          const uint8_t* fields_msgpack, size_t fields_len,
+          std::vector<uint8_t>& out);
+
+// Send a text message to dest_hash as a packet over an established
+// link (LXMF DIRECT delivery, used for replies on the link a sender
+// opened to us). Returns true if a packet was handed to the link.
+bool send_over_link(const RNS::Link& link, const uint8_t* dest_hash, const char* content);
 
 } } // namespace rlr::lxmf

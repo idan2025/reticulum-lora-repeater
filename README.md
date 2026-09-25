@@ -103,6 +103,31 @@ The firmware operates as a full Reticulum transport node:
 - **Automatic radio recovery** — if the SX1262 becomes unresponsive
   after flash I/O, the firmware hardware-resets and reconfigures it
 
+### Remote status over LXMF
+
+Check on a deployed node from your phone: send a message from Sideband
+or MeshChat to the node (it shows up by its `display_name`) and it
+replies.
+
+| Message | Reply |
+|---|---|
+| `/status` | Name, firmware, uptime, radio/TX state, frequency, packet counters, paths, battery |
+| `/battery` | Battery voltage and estimated charge % |
+| `/help` | The command list |
+
+Commands are case-insensitive and the `/` is optional. Any other text
+gets no reply, so chatting at the node costs no airtime.
+
+Repeating always comes first: replies are sent from the main loop at
+most one at a time, a sender gets at most one reply per 15 s, retried
+duplicates are answered once, and at most 3 incoming LXMF links are
+held open (idle ones are closed after 2 minutes). Anyone who can reach
+the node can query it — the replies are read-only. Turn the feature off
+entirely with `CONFIG SET lxmf_commands 0` + `CONFIG COMMIT`.
+
+The battery % is a linear 3.3 V–4.2 V single-cell LiPo estimate; run
+`CALIBRATE BATTERY <mV>` once for accurate voltage.
+
 ### BLE wireless configuration
 
 - **Custom GATT service** with three characteristics:
@@ -152,6 +177,7 @@ All settings persist across reboots in internal flash (Config schema v3):
 | `bt_enabled` | on/off | Enable BLE advertising |
 | `bt_pin` | 0-999999 | BLE pairing PIN (0 = no PIN) |
 | `collector` | 32 hex / blank | Telemetry collector's `lxmf.delivery` hash; blank = telemetry off |
+| `lxmf_commands` | on/off | Answer `/status` / `/battery` LXMF messages (on by default) |
 | `latitude` | -90 to 90 | Node latitude (degrees) |
 | `longitude` | -180 to 180 | Node longitude (degrees) |
 | `altitude` | -100000 to 100000 | Altitude in meters MSL |

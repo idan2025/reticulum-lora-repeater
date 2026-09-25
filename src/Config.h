@@ -74,6 +74,11 @@ enum : uint8_t {
     // therefore boots RX-only until the operator confirms a legal
     // frequency and enables TX. See issue #4 and config::tx_enabled().
     CONFIG_FLAG_TX_DISABLED = 1 << 4,
+    // bit 5: LXMF remote commands (/status, /battery) inhibit. Stored
+    // inverted for the same reason as bit 4: existing configs have it
+    // clear, so the feature is on after upgrade; `lxmf_commands 0` is
+    // the field kill switch. See LxmfInbox.cpp.
+    CONFIG_FLAG_CMDS_DISABLED = 1 << 5,
 };
 
 namespace config {
@@ -84,6 +89,11 @@ namespace config {
 // frequency and enabled TX.
 inline bool tx_enabled(const Config& cfg) {
     return !(cfg.flags & CONFIG_FLAG_TX_DISABLED);
+}
+
+// True when the node answers LXMF /status and /battery messages.
+inline bool lxmf_commands_enabled(const Config& cfg) {
+    return !(cfg.flags & CONFIG_FLAG_CMDS_DISABLED);
 }
 
 // Populate `out` with the board's hardcoded defaults from the

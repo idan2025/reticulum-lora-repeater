@@ -24,6 +24,7 @@
 // value (a nested msgpack `bin`), matching Sideband's Telemeter.packed().
 
 #include "Telemetry.h"
+#include "Battery.h"
 #include "Lxmf.h"
 #include "Msgpack.h"
 #include "Transport.h"
@@ -89,18 +90,6 @@ static bool collector_unset(const Config& cfg) {
     return true;
 }
 
-// Approximate single-cell LiPo charge percentage from terminal voltage.
-// A linear 3.30 V (0%) .. 4.20 V (100%) map — coarse but adequate for a
-// telemetry indicator; documented as an estimate. Boards with different
-// chemistry/cell counts can be refined later.
-static float battery_percent(uint16_t mv) {
-    if (mv == 0) return 0.0f;
-    float pct = (float)(mv - 3300) / (4200.0f - 3300.0f) * 100.0f;
-    if (pct < 0.0f)   pct = 0.0f;
-    if (pct > 100.0f) pct = 100.0f;
-    return roundf(pct * 10.0f) / 10.0f;   // 0.1% resolution, like Sideband
-}
-
 // Emit a big-endian struct int as a msgpack bin (sense.py wraps each
 // struct.pack("!i"/"!I"/"!H", ...) result as a Python bytes → msgpack bin).
 static void bin_be32(msgpack::Writer& w, uint32_t v) {
@@ -148,7 +137,7 @@ static void build_telemeter(const Config& cfg, msgpack::Writer& tele) {
     if (have_bat) {
         tele.uint(SID_BATTERY);
         tele.array_header(3);
-        tele.float64(battery_percent(batt_mv));
+        tele.float64(rlr::battery::percent(batt_mv));
         tele.boolean(false);                                  // charging unknown
         tele.nil();                                           // temperature unknown
     }

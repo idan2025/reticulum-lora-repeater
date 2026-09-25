@@ -79,4 +79,32 @@ private:
     void be64(uint64_t v);
 };
 
+// Bounds-checked msgpack reader — just enough to pick apart an inbound
+// LXMF payload. Every call returns false (and leaves the reader in an
+// undefined position) on truncated or unsupported input; callers treat
+// that as "not a message we understand" and drop it.
+class Reader {
+public:
+    Reader(const uint8_t* data, size_t len) : _p(data), _end(data + len) {}
+
+    // Array header (fixarray / array16 / array32).
+    bool array_header(size_t& n);
+
+    // str or bin family: points `out` into the buffer, no copy.
+    bool bytes(const uint8_t*& out, size_t& len);
+
+    // Skip one complete value of any type, including nested containers.
+    bool skip();
+
+    size_t remaining() const { return (size_t)(_end - _p); }
+
+private:
+    const uint8_t* _p;
+    const uint8_t* _end;
+
+    bool take(size_t n, const uint8_t*& out);
+    bool be(size_t n, uint32_t& out);
+    bool skip_depth(int depth);
+};
+
 } } // namespace rlr::msgpack

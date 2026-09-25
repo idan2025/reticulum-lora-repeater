@@ -123,6 +123,7 @@ Valid keys:
 | `lxmf` | bool | LXMF presence announces |
 | `heartbeat` | bool | Heartbeat LED |
 | `bt_enabled` | bool | BLE console (takes effect after commit/reboot) |
+| `lxmf_commands` | bool | Answer LXMF `/status` / `/battery` messages (default on; takes effect after commit/reboot) |
 | `bt_pin` | uint32 | 0 – 999999 (BLE pairing PIN, 0 = none) |
 | `latitude` | float | -90 – 90 degrees |
 | `longitude` | float | -180 – 180 degrees |
@@ -238,6 +239,7 @@ enumerates as a new USB serial port.
 ← altitude=0
 ← log_level=1
 ← collector=
+← lxmf_commands=1
 ← OK
 → CONFIG COMMIT
 ← committed, rebooting...

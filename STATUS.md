@@ -24,6 +24,10 @@ suite.
   ASCII `rlr.telemetry` beacon. Gated on a configured `collector` hash.
 - **LXMF presence** — announces on `lxmf.delivery` so MeshChat /
   Sideband show the node by name.
+- **LXMF remote status** — answers `/status`, `/battery`, `/help`
+  messages (opportunistic or over a link, replying on the link
+  backchannel when the sender identifies). Rate-limited, kill switch
+  `lxmf_commands`. See `src/LxmfInbox.cpp`.
 - **BLE / web flasher / serial console** — all live; see `README.md`.
 
 ## Dependencies
